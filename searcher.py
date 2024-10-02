@@ -6,8 +6,8 @@ from collections import Counter
 # just need this for function type hinting, could also be solved by upgrading to python3.9+
 from typing import List
 
-PrintOn = True
-## NOTE Can't get an incorrect input like "flat valve" (misheard flap as flat) to detect flat. Tried to do a fuzzy match on the level of words, 
+PrintOn = 1
+## NOTE Can't get an incorrect input_search_term like "flat valve" (misheard flap as flat) to detect flap. Tried to do a fuzzy match on the level of words, 
 ## but didn't really work, and the fuzzy match on the level of letters is returning self cutting isolating valve for some reason
 print(".","\n"*8)
 # Load database to be searched
@@ -29,9 +29,9 @@ db = pd.read_csv(description_base_dir,encoding='utf-7', delimiter='\t', usecols 
 
 test_input = "3/4” non return valve"
 
-def input_to_search_terms(input : str = test_input,
-                                search_term_type : str = "ALPHABETIC WITH SPACES",
-                                clean_of_irrelevants : bool = True):
+def input_to_search_terms(input_search_term : str = test_input,
+                        search_term_type : str = "ALPHABETIC WITH SPACES",
+                        clean_of_irrelevants : bool = True):
 # I feel like making this all one function is a bad coding practice
 
     ## Generate filters from input
@@ -46,20 +46,19 @@ def input_to_search_terms(input : str = test_input,
     number_keeper = r"[^\d+]" 
     
     if clean_of_irrelevants:
-        # Quick clean of the input to remove irrelevants
-        print(input)
-        input = re.sub(irrelevants_pattern,'',input)
+        # Quick clean of the input_search_term to remove irrelevants
+        input_search_term = re.sub(irrelevants_pattern,'',input_search_term)
 
     if search_term_type == "ALPHABETIC WITH SPACES":
-        # Remove non-alpha parts and clean the input
-        search_for_alphabetic_parts_with_spaces = re.sub(number_remover_space_keeper,'', input, flags=re.IGNORECASE).strip()
+        # Remove non-alpha parts and clean the input_search_term
+        search_for_alphabetic_parts_with_spaces = re.sub(number_remover_space_keeper,'', input_search_term, flags=re.IGNORECASE).strip()
         search_for_alphabetic_parts_with_spaces = re.sub(double_space_remover,' ', search_for_alphabetic_parts_with_spaces, flags=re.IGNORECASE).strip()
         return search_for_alphabetic_parts_with_spaces
         
     if search_term_type == "NUMBERS":
         # Remove non-numeric parts
-        search_for_number_parts = re.sub(number_keeper, '', input)
-        # Number part searches for anything containing all numbers found in the input
+        search_for_number_parts = re.sub(number_keeper, '', input_search_term)
+        # Number part searches for anything containing all numbers found in the input_search_term
         search_for_number_parts = ''.join([f"(?=.*{number})" for number in search_for_number_parts])
         return search_for_number_parts
     
@@ -74,47 +73,31 @@ def search_with_search_term(search_term,
         print(f"Search base is None, skipping search. Would've searched for '{search_term}'")if PrintOn else None
         return None
 
-    search_term_alphabetic_parts_with_spaces = input_to_search_terms(input = search_term,
-                                                                    search_term_type= "ALPHABETIC WITH SPACES", 
-                                                                    clean_of_irrelevants=True)
-    #tk clean this, input and search term are getting confused
-    search_term_numbers = input_to_search_terms(input = search_term,
-                                            search_term_type= "NUMBERS", 
-                                            clean_of_irrelevants=True)
+
     matches = None
     
     if "DIRECT" in match_type:
         if match_type == "DIRECT ENTIRE":
             # Perform case-insensitive search, looking for any entry that contains the entire search term as searched (exactly)
             matches = search_base[search_base['Description'].str.contains(search_term_alphabetic_parts_with_spaces, case=False, na=False)]
+
         elif match_type == "DIRECT WORDS":
             search_term_split_to_words = search_term_alphabetic_parts_with_spaces.split()
-            print("search_term_split_to_words",search_term_split_to_words)
+            print(f"Splitting search term and searching individually for {search_term_split_to_words}") if PrintOn else None
             #Gives a list of DataFrames
             matches_as_description_list = [search_with_search_term(search_single_word,
                                                                    search_base, 
-                                                                   match_type="DIRECT ENTIRE")["Description"]
+                                                                   match_type="DIRECT ENTIRE")
                                            for search_single_word in search_term_split_to_words]
             # Concatenate DataFrames together
             matches_to_single_words_concatenated = pd.concat(matches_as_description_list)
-            #matches_by_word = [search_base['Description'].str.contains(search_single_word, case=False, na=False) for search_single_word in search_term_split_to_words]
-            
-            #print("matches_by_word",matches_by_word)
-            # Committing to making this a list rather than appending together to create a giga DF and using value_counts
-            # Will turn back into dataframe before returning, but this will be without reference IDs, so this
-            # critically needs to be fixed tk
-            # Flattens List
-            #matches_as_description_list = [x for xs in matches_as_description_list for x in xs]
-            # Removes [] from list in case word doesn't show at all within search_base
-            #matches_as_description_list = list(filter(lambda a: a != [], matches_as_description_list))
-            #Return only terms with more than 1 result (so no entirely dependent on one word in search_term)
-            frequency_of_matches = Counter(matches_as_description_list)
-            # Include a result if it shows up as a result for more than one word, then get rid of duplicates
-            good_matches_as_description_list = list(set([word_match for word_match in matches_as_description_list if frequency_of_matches[word_match] > 1]))
-            print("good_matches",good_matches_as_description_list)
-            good_matches_as_dataframe = pd.DataFrame({"Description": good_matches_as_description_list})
-            #print("matches_as_description_list",matches_as_description_list)
-            return good_matches_as_dataframe
+            # Counting number of occurences of each entry (Using 'Reference' is arbitrary)
+            number_counts = matches_to_single_words_concatenated['Reference'].value_counts()
+            # Keep entry if it shows up more than once
+            matches = matches_to_single_words_concatenated[matches_to_single_words_concatenated['Reference'].isin(number_counts[number_counts > 1].index)]
+            # Drop duplicates
+            matches.drop_duplicates(keep = 'first',inplace= True)
+            print(f"When searching for each of {search_term_split_to_words} and keeping only results that show more than once, these are the {len(matches)} results:",matches) if PrintOn else None
         
     elif "FUZZY" in match_type:
         # Need to change get_close_matches so it's case insensitive. Gives more similar results.
@@ -128,7 +111,6 @@ def search_with_search_term(search_term,
             return matches
         if match_type == "FUZZY LETTERS":
             # Uses difflib similarity (gestalt pattern matching apparently) with letters as atoms
-            print(search_term)
             matches_as_description_list = get_close_matches_case_insensitive(search_term_alphabetic_parts_with_spaces, search_base["Description"].to_list(),cutoff=cutoff_for_fuzzy_match, n = num_of_fuzzy_returns)
         elif match_type == "FUZZY WORDS":
             ## DEPRECATED ##
@@ -167,10 +149,8 @@ def search_with_search_term(search_term,
             print("Found matches debug")if PrintOn else None
 
     elif match_type == "NUMBERS":
-        search_term_numbers = input_to_search_terms(input = search_term,
-                                                    search_term_type= "NUMBERS", 
-                                                    clean_of_irrelevants=True)
-        search_results_number_pass = search_with_search_term(search_term=search_term_numbers, search_base=search_base)
+
+        search_results_number_pass = search_with_search_term(search_term=search_term, search_base=search_base)
         
         return search_results_number_pass
     # Display the matched rows and their indices
@@ -185,13 +165,13 @@ def search_with_search_term(search_term,
         print(f"No match found for '{search_term}'")if PrintOn else None
         return None
 
-def alpha_then_number_search(input = test_input):
-
-    print(f"** RAW SEARCH TERM : '{input}' **")if PrintOn else None
+def alpha_then_number_search(input_search_term = test_input):
+    # Deprecated, job done by match_method_series_search_refiner now
+    print(f"** RAW SEARCH TERM : '{input_search_term}' **")if PrintOn else None
 
     # Perform the first search for alphabetic parts
     print("** FIRST PASS : CHECKING FOR DESCRIPTION ENTIRE TERM MATCH **")if PrintOn else None
-    search_term_alphabetic_parts_with_spaces = input_to_search_terms(input = input,
+    search_term_alphabetic_parts_with_spaces = input_to_search_terms(input_search_term = input_search_term,
                                                                     search_term_type= "ALPHABETIC WITH SPACES", 
                                                                     clean_of_irrelevants=True)
 
@@ -205,7 +185,7 @@ def alpha_then_number_search(input = test_input):
                                                                 search_base=sb,
                                                                 match_type = "FUZZY LETTERS")
 
-    search_term_numbers = input_to_search_terms(input = input,
+    search_term_numbers = input_to_search_terms(input_search_term = input_search_term,
                                                 search_term_type= "NUMBERS", 
                                                 clean_of_irrelevants=True)
     # If there are matches, perform the second search for numeric parts
@@ -220,7 +200,6 @@ def alpha_then_number_search(input = test_input):
         if isinstance(search_results_number_pass, pd.DataFrame):
             if len(search_results_number_pass) == 1:
                 #pipeline this into the excel spreadsheet
-                print("YAAY")
                 pass
             elif len(search_results_number_pass) >1:
                 # need to do a thirdpass, or manual review for duplicates
@@ -235,27 +214,38 @@ def alpha_then_number_search(input = test_input):
 
 #alpha_then_number_search()
 
-def match_method_series_search_refiner(input : str = test_input,
+def match_method_series_search_refiner(input_search_term : str = test_input,
                                match_method_series : List[str] = ["DIRECT ENTIRE"],
                                init_search_base = sb):
 
-    print(f"** RAW SEARCH TERM : '{input}' **")if PrintOn else None
-
-
-    # Get search term cleaned for letters in words seperated by spaces
-
+    print(f"** RAW SEARCH TERM : '{input_search_term}' **")if PrintOn else None
+    # Initialise search results
     search_results = pd.DataFrame()
+    # Initialise search base
     search_base = init_search_base
+    # Start attempt, with method
     for attempt_number,match_method in enumerate(match_method_series):
-        print(f"** ATTEMPT NUMBER {attempt_number+1}: USING METHOD \"{match_method}\"")
-        search_results = search_with_search_term(search_term=input,
+        print(f"** ATTEMPT NUMBER {attempt_number+1}: USING METHOD \"{match_method}\"") if PrintOn else None
+        if not "NUMBERS" in match_method_series:
+            search_term = input_to_search_terms(input_search_term = input_search_term,
+                                                                search_term_type= "ALPHABETIC WITH SPACES", 
+                                                                clean_of_irrelevants=True)
+        else:
+            search_term = input_to_search_terms(input_search_term = input_search_term,
+                                            search_term_type= "NUMBERS", 
+                                            clean_of_irrelevants=True)
+            
+        # Apply method to search base, return search_results using that method
+        search_results = search_with_search_term(search_term=search_term,
                                                 search_base= search_base,
                                                 match_type=match_method)
+        # If that method refined the search base to nothing, skip it and try the next one
         if search_results.empty:
-            print("No search results found for this method, continuing to next method")
+            print("No search results found for this method, continuing to next method") if PrintOn else None
+        # If it refined successfully to one or more entry, make the results the new base and move to next refinement method
         else:
             search_base = search_results
-    print(f"After applying {' then, '.join(match_method_series)}, these are the search results found for \"{input}\":\n",search_results)
+    print(f"After applying {' then, '.join(match_method_series)}, these are the {len(search_results)} search results found for \"{input_search_term}\":\n",search_results) if PrintOn else None
     return search_results
 
 def match_from_description_database_to_search_database():
@@ -282,6 +272,6 @@ def match_from_description_database_to_search_database():
 #sys.stdout = open(os.devnull, 'w')
 #match_from_description_database_to_search_database()
 #alpha_then_number_search(test_input)
-match_method_series_search_refiner(input = test_input,
+match_method_series_search_refiner(input_search_term = test_input,
                            match_method_series= ["DIRECT WORDS","NUMBERS"],
                            init_search_base=sb)
